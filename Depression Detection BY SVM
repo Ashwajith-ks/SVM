@@ -1,0 +1,170 @@
+import pandas as pd
+import numpy as np
+from matplotlib import pyplot as plt
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+df = pd.read_csv('Suicide_Detection.csv', encoding="ISO-8859-1")
+df.head()
+  suicide = df[df['class']=='suicide']
+non_suicide = df[df['class']== 'non-suicide']
+suicide = suicide.head(25000)
+non_suicide = non_suicide.head(25000)
+df = pd.concat([suicide,non_suicide])
+!pip install text_hammer
+
+from tqdm import tqdm
+import pandas as pd
+import text_hammer as th
+
+tqdm.pandas()
+
+def text_preprocessing(df, col_name):
+    column = col_name
+    df[column] = df[column].progress_apply(lambda x: str(x).lower())
+    df[column] = df[column].progress_apply(lambda x: th.remove_emails(x))
+    df[column] = df[column].progress_apply(lambda x: th.remove_html_tags(x))
+    df[column] = df[column].progress_apply(lambda x: th.remove_special_chars(x))
+    df[column] = df[column].progress_apply(lambda x: th.remove_accented_chars(x))
+    return df
+
+df = text_preprocessing(df, 'text')
+df_preprocess = df.copy()
+posts = df_preprocess.text.copy()
+def removeWordWithChar(text, char_list):
+    text = text.split()
+    res = [ele for ele in text if all(ch not in ele for ch in char_list)]
+    res = ' '.join(res)
+    return res
+
+char_list = ['@', '#', 'http', 'www', '/', '[]']
+
+removeWordWithChar(posts[1], char_list)
+
+posts_cleaned = []
+
+for p in posts:
+    posts_cleaned.append(removeWordWithChar(p, char_list))
+def tokenize(texts):
+    tokenizer = nltk.RegexpTokenizer(r'\w+')
+
+    texts_tokens = []
+    for i, val in enumerate(texts):
+        text_tokens = tokenizer.tokenize(val.lower())
+
+        for i in range(len(text_tokens) - 1, -1, -1):
+            if len(text_tokens[i]) < 4:
+                del (text_tokens[i])
+
+        texts_tokens.append(text_tokens)
+
+    return texts_tokens
+  posts_tokens = tokenize(posts_cleaned)
+nltk.download('stopwords')
+nltk.download('punkt')
+
+def removeSW(texts_tokens):
+    stopWords = set(stopwords.words('english'))
+    texts_filtered = []
+
+    for i, val in enumerate(texts_tokens):
+        text_filtered = []
+        for w in val:
+            if w not in stopWords:
+                text_filtered.append(w)
+        texts_filtered.append(text_filtered)
+
+    return texts_filtered
+
+posts_filtered = removeSW(posts_tokens)
+def lemma(texts_filtered):
+    wordnet_lemmatizer = WordNetLemmatizer()
+    texts_lem = []
+
+    for i, val in enumerate(texts_filtered):
+        text_lem = []
+        for word in val:
+            text_lem.append(wordnet_lemmatizer.lemmatize(word, pos="v"))
+        texts_lem.append(text_lem)
+
+    return texts_lem
+posts_lem = lemma(posts_filtered)
+posts_ready = []
+for posts in posts_lem:
+    string = ' '
+    string = string.join(posts)
+    posts_ready.append(string)
+data = [{'text': text, 'class': label} for text, label in zip(posts_ready, df['class'])]
+
+df_ready = pd.DataFrame(data)
+
+X = df_ready['text']
+y = df_ready['class']
+
+df_ready
+from keras.preprocessing.text import Tokenizer
+
+tokenizer=Tokenizer(num_words= 15000,lower=True)
+tokenizer.fit_on_texts(X)
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+X = tokenizer.texts_to_sequences(X)
+X = pad_sequences(X,maxlen=100,padding='post')
+X[0]
+import gensim.downloader as api
+glove_gensim  = api.load('glove-wiki-gigaword-100') #100 dimension
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, LSTM, Embedding,Bidirectional,SimpleRNN
+import tensorflow
+ from tensorflow.compat.v1.keras.layers import CuDNNRNN
+from tensorflow.keras.layers import Dropout, Flatten
+from sklearn.model_selection import train_test_split
+y=pd.get_dummies(df['class'])
+X_train, X_test, y_train, y_test = train_test_split(X,y, test_size = 0.3, random_state = 123)
+from tensorflow.keras.optimizers import Adam
+
+X_reshaped = X.reshape(X.shape[0], X.shape[1], 1)
+
+EMBEDDING_DIM = 100
+model = Sequential()
+
+model.add(Embedding(input_dim=num_words,
+                    output_dim=EMBEDDING_DIM,
+                    input_length=X.shape[1], weights=[gensim_weight_matrix],
+                    trainable=False))
+
+model.add(Dropout(0.425))
+model.add(Bidirectional(LSTM(units=350, return_sequences=True)))
+model.add(Dropout(0.225))
+model.add(Bidirectional(LSTM(units=450, return_sequences=True)))
+
+model.add(Dropout(0.5))
+model.add(SimpleRNN(100, return_sequences=True))
+model.add(Dropout(0.4))
+model.add(SimpleRNN(150, return_sequences=False))
+
+
+model.add(Dense(2, activation='softmax'))
+model.compile(loss = 'categorical_crossentropy', optimizer = Adam(learning_rate=0.001),metrics = 'accuracy')
+model.summary()
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+es = EarlyStopping(monitor = 'val_loss', mode = 'min', verbose = 1, patience = 5)
+mc = ModelCheckpoint('./model.h5', monitor = 'val_accuracy', mode = 'max', verbose = 1, save_best_only = True)
+history_embedding = model.fit(X_train, y_train,
+                                epochs = 2, batch_size = 128,
+                                validation_data=(X_test, y_test),
+                                verbose = 1, callbacks= [es, mc]  )
+import pickle
+
+with open('lstm_model.pkl', 'wb') as f:
+    pickle.dump(model, f)
+
+with open('tokenizer.pkl', 'wb') as f:
+    pickle.dump(tokenizer, f)
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+plt.plot(history_embedding.history['accuracy'],label='train accuracy')
+plt.plot(history_embedding.history['val_accuracy'],label='validation accuracy')
+plt.legend(loc='lower right')
+plt.show()
